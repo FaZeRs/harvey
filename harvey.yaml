@@ -127,3 +127,16 @@ compliance:
     # Harvey also tells Precleared the recipient's country when the company's
     # location makes it certain, and the company's and person's names when
     # it has them (see docs/precleared.md).
+
+# A homepage mock-up for a prospect who replies with interest and whose site
+# is flagged OUTDATED_SITE: OpenDesign builds it, Harvey publishes it to your
+# previews repo, and the answer it drafts links to it (still via the Outbox).
+# Off by default; setup in docs/mockups.md.
+mockups:
+  enabled: false
+  ssh_host: ""          # e.g. root@od.example.internal (restricted key, see docs)
+  ssh_key: ""           # e.g. ~/.ssh/harvey_opendesign
+  previews_repo: ""     # local clone of your previews repo, e.g. ~/previews
+  base_url: ""          # where it's served, e.g. https://preview.example.com
+  daily_limit: 5
+  timeout_minutes: 45

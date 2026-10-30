@@ -7,7 +7,7 @@ name = "harvey"
 version = "0.3.0"
 description = "Autonomous AI sales agent. Always Be Closing."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 license = "MIT"
 keywords = ["sales", "ai-agent", "cold-email", "prospecting", "autonomous-agent", "claude"]
 classifiers = [

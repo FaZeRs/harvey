@@ -109,7 +109,7 @@ Profiling and outbox draining ride along on **every** cycle regardless, because 
 
 ### Prerequisites
 
-- **Python 3.11+** — check with `python3 --version`. macOS ships 3.9; if that's what you have, `brew install python@3.13` first.
+- **Python 3.11.4+** — check with `python3 --version`. macOS ships 3.9; if that's what you have, `brew install python@3.13` first.
 - An active **Claude Pro or Max** subscription, with the CLI logged in (`claude login`) — or, opt-in, a **ChatGPT plan with the Codex CLI** ([see below](#using-a-chatgpt-plan-instead-codex))
 - A mailbox to send from — Gmail/Workspace recommended, on a *dedicated secondary domain*. Microsoft 365 works too ([setup](docs/microsoft365.md))
 - A warmup service on that mailbox — we recommend [TrulyInbox](https://trulyinbox.com/?via=harvey). It warms a new mailbox before cold email, keeps it out of spam after, and Harvey reads its inbox rate to tell you when you're ready ([Warmup](#warmup-with-trulyinbox))
