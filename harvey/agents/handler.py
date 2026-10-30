@@ -20,6 +20,7 @@ from harvey.config import (
 from harvey.gate import autopilot_review, do_not_contact_match, pre_send_check
 from harvey.humanize import humanize, humanizer_enabled
 from harvey.integrations.instantly import InstantlyClient
+from harvey import mockups
 from harvey.integrations.mail_provider import (
     NATIVE_PROVIDERS, get_mail_provider, strip_quoted_reply,
 )
@@ -529,8 +530,16 @@ class Handler:
         # spend a model call drafting; they go to you instead (step 3).
         listed = do_not_contact_match(prospect.email or lead_email,
                                       live_do_not_contact(self.config))
+        # An interested prospect with an outdated site gets a mock-up first:
+        # the answer is drafted when it's live (mockups.process), with the link.
+        mockup_for = None
+        if intent == "interested" and self.is_native and not held and not listed:
+            try:
+                mockup_for = await mockups.eligible(self.state, self.config, prospect)
+            except Exception as e:
+                logger.warning(f"Handler: mock-up check failed for {lead_email}: {e}")
         response = ""
-        if intent in AUTO_REPLY_INTENTS and not held and not listed:
+        if intent in AUTO_REPLY_INTENTS and not held and not listed and not mockup_for:
             response = await self._generate_response(intent, reply_text, prospect, convo)
 
         # 2c. Store the conversation in one write.
@@ -620,6 +629,13 @@ class Handler:
                 f"Handler: reply from {lead_email} held for a human: Instantly can't "
                 "queue replies for approval while require_approval is true."
             )
+            return
+
+        if mockup_for:
+            await mockups.start_job(self.state, convo.id, prospect, mockup_for,
+                                    reply_text, reply_meta or {})
+            logger.info(f"Handler: {lead_email} is interested. Making a homepage mock-up "
+                        f"for {mockup_for['name']}; the answer follows when it's live.")
             return
 
         # For interested, objection, question, wrong_person — the reply drafted above
@@ -803,6 +819,26 @@ class Handler:
             await self.state.set_setting(KILL_SWITCH_KEY, reason)
             logger.error(f"Handler: KILL SWITCH ENGAGED — {reason}")
 
+    async def answer_after_mockup(self, job: dict, url: str):
+        """Draft and queue the answer a mock-up job held back. ``url`` is
+        the live mock-up, or "" when it failed or ran out of time."""
+        prospect = await self.state.get_prospect(job["prospect_id"])
+        convo = await self.state.get_conversation(job["convo_id"])
+        if not prospect or not convo or prospect.status == "opted_out" or convo.status != "open":
+            logger.info("Handler: mock-up answer dropped; the conversation moved on.")
+            return
+        response = await self._generate_response(
+            "interested", job.get("reply_text", ""), prospect, convo, mockup_url=url)
+        if not response:
+            await self.state.update_conversation(convo.id, status="needs_human")
+            await self.state.log_action(
+                action_type="escalation", agent="handler",
+                details={"prospect_email": prospect.email, "reason": "no usable reply draft",
+                         "mockup_url": url})
+            return
+        await self._queue_native_reply(response, prospect, convo,
+                                       job.get("reply_meta") or {}, "interested")
+
     async def _queue_native_reply(
         self, response: str, prospect, convo, reply_meta: dict, intent: str
     ):
@@ -942,7 +978,8 @@ Respond with ONLY the category label, nothing else."""
         return current_stage
 
     async def _generate_response(
-        self, intent: str, reply_text: str, prospect, convo: Conversation
+        self, intent: str, reply_text: str, prospect, convo: Conversation,
+        mockup_url: str = "",
     ) -> str:
         """Generate an appropriate response based on intent."""
         history = conversation_history(convo.thread, prospect.full_name())
@@ -997,6 +1034,12 @@ Write a reply that:"""
 - Suggests a specific next step (brief call or meeting)
 - Keeps it short (under 80 words)
 - Includes a clear CTA with flexibility on timing"""
+            if mockup_url:
+                prompt += f"""
+- Shares this link to a homepage concept we sketched for them from their current
+  site, in one plain sentence (call it a quick concept, not a finished site):
+  {mockup_url}
+- Invites a short call to walk through it"""
         elif intent == "objection":
             prompt += """
 - Addresses the concern directly and empathetically

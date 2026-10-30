@@ -596,6 +596,26 @@ class WriterConfig(BaseModel):
     humanizer: bool = False
 
 
+class MockupConfig(BaseModel):
+    """A homepage mock-up for a prospect who replied with interest and whose
+    site Harvey flagged as outdated (OUTDATED_SITE). OpenDesign builds it,
+    Harvey publishes it to a static previews repo, and the answer it drafts
+    links to it. See docs/mockups.md. Off by default."""
+    enabled: bool = False
+    # SSH target and key that reach OpenDesign through a forced command
+    # allowing only "mcp" and "fetch harvey-<id>" (docs/mockups.md).
+    ssh_host: str = ""
+    ssh_key: str = ""
+    # Local clone of the previews repo; each push deploys it (e.g. Vercel).
+    previews_repo: str = ""
+    # Where that repo is served, e.g. https://preview.example.com
+    base_url: str = ""
+    agent: str = "claude"            # OpenDesign agent runtime id
+    daily_limit: int = 5             # mock-ups started per day, at most
+    # How long the answer waits for a mock-up before it goes without one.
+    timeout_minutes: int = 45
+
+
 class HarveyConfig(BaseModel):
     persona: PersonaConfig
     product: ProductConfig
@@ -605,6 +625,7 @@ class HarveyConfig(BaseModel):
     brain: BrainConfig = BrainConfig()
     compliance: ComplianceConfig = ComplianceConfig()
     writer: WriterConfig = WriterConfig()
+    mockups: MockupConfig = MockupConfig()
     # The file it was loaded from, so a running Harvey can re-read the
     # sending mode from that same file (refresh_sending_mode).
     _source_path: str | None = PrivateAttr(default=None)

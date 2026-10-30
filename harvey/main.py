@@ -421,6 +421,16 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
 
             outcomes = await _run_agents(tasks)
 
+            # Mock-ups for interested prospects: after the handler (which
+            # starts them) and before sending (which sends the answer they
+            # held back). A failure here never stops the cycle.
+            if config.mockups.enabled and not send_only:
+                try:
+                    from harvey import mockups
+                    await mockups.process(state, config, handler)
+                except Exception as e:
+                    logger.warning(f"Mockups stage failed: {e}")
+
             # Phase 2: send — only after every reply-reading task this cycle
             # finished reading and handling replies (it returns True; a
             # failure, exception or timeout doesn't), and only if the brain
