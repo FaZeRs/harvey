@@ -648,7 +648,9 @@ class Handler:
             return
 
         if pending_mockup:
-            pending_mockup.update(reply_text=reply_text, reply_meta=reply_meta or {})
+            # The held answer answers this latest message, as what it is.
+            pending_mockup.update(reply_text=reply_text, reply_meta=reply_meta or {},
+                                  intent=intent)
             await mockups.save_job(self.state, pending_mockup)
             logger.info(f"Handler: {lead_email} wrote again while their mock-up is being "
                         "made; one answer follows when it's ready.")
@@ -843,8 +845,9 @@ class Handler:
         if not prospect or not convo or prospect.status == "opted_out" or convo.status != "open":
             logger.info("Handler: mock-up answer dropped; the conversation moved on.")
             return
+        intent = job.get("intent") or "interested"
         response = await self._generate_response(
-            "interested", job.get("reply_text", ""), prospect, convo, mockup_url=url)
+            intent, job.get("reply_text", ""), prospect, convo, mockup_url=url)
         if not response:
             await self.state.update_conversation(convo.id, status="needs_human")
             await self.state.log_action(
@@ -853,7 +856,7 @@ class Handler:
                          "mockup_url": url})
             return
         await self._queue_native_reply(response, prospect, convo,
-                                       job.get("reply_meta") or {}, "interested")
+                                       job.get("reply_meta") or {}, intent)
 
     async def _queue_native_reply(
         self, response: str, prospect, convo, reply_meta: dict, intent: str
@@ -1050,12 +1053,6 @@ Write a reply that:"""
 - Suggests a specific next step (brief call or meeting)
 - Keeps it short (under 80 words)
 - Includes a clear CTA with flexibility on timing"""
-            if mockup_url:
-                prompt += f"""
-- Shares this link to a homepage concept we sketched for them from their current
-  site, in one plain sentence (call it a quick concept, not a finished site):
-  {mockup_url}
-- Invites a short call to walk through it"""
         elif intent == "objection":
             prompt += """
 - Addresses the concern directly and empathetically
@@ -1074,6 +1071,13 @@ Write a reply that:"""
 - Asks who the right person would be
 - Makes it easy for them to refer (one-line ask)
 - Under 50 words"""
+
+        if mockup_url:
+            prompt += f"""
+- Shares this link to a homepage concept we sketched for them from their current
+  site, in one plain sentence (call it a quick concept, not a finished site):
+  {mockup_url}
+- Invites a short call to walk through it"""
 
         prompt += "\n\nWrite ONLY the email body. No subject line, no greeting label, no signature block, no markdown."
 

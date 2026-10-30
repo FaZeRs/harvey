@@ -307,3 +307,44 @@ async def test_second_reply_joins_the_held_answer(state):
     assert await state.get_outbox(status="pending_review") == []
     [cid] = json.loads(await state.get_setting(mockups.JOBS_KEY))
     assert (await mockups.get_job(state, cid))["reply_meta"]["message_id"] == "<m2@x>"
+
+
+@pytest.mark.asyncio
+async def test_question_during_a_mockup_is_answered_once_as_a_question(state):
+    from tests.test_prompt_injection import RecordingBrain
+    handler = await held_reply(state)                   # stub brain classifies "interested"
+    p = await state.get_prospect_by_email("jane@acme.example")
+    handler.brain._intent = "question"
+    await handler._process_reply(p.email, "What does it cost?", "",
+                                 reply_meta={"subject": "Hi", "message_id": "<m2@x>"})
+    [cid] = json.loads(await state.get_setting(mockups.JOBS_KEY))
+    job = await mockups.get_job(state, cid)
+    assert job["intent"] == "question" and job["reply_text"] == "What does it cost?"
+
+    handler.brain = RecordingBrain(text_reply="It starts at a fixed price; here's a concept.")
+    await handler.answer_after_mockup(job, "https://preview.example.com/acme-abc123/")
+    prompt = handler.brain.prompts[-1]
+    assert "Answers their question" in prompt
+    assert "https://preview.example.com/acme-abc123/" in prompt
+    [item] = await state.get_outbox(status="pending_review")
+    assert item["in_reply_to"] == "<m2@x>"
+
+
+def test_asset_refs_reads_any_quoting_and_skips_page_links():
+    refs = mockups.asset_refs(
+        "<img src='a.jpg'><img src=b.png><img srcset=\"c.jpg 1x, d.jpg 2x\">"
+        "<link rel=stylesheet href=s.css><a href=\"about.html\">About</a>")
+    assert refs == {"a.jpg", "b.png", "c.jpg", "d.jpg", "s.css"}
+
+
+@pytest.mark.asyncio
+async def test_single_quoted_missing_image_is_not_live():
+    import httpx
+
+    def answer(request):
+        if request.url.path == "/acme/":
+            return httpx.Response(200, text="<img src='assets/gone.jpg'>")
+        return httpx.Response(404)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    assert await mockups.is_live("https://preview.example.com/acme/", client) is False
+    await client.aclose()

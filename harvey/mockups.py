@@ -29,6 +29,7 @@ import tarfile
 import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
@@ -297,6 +298,30 @@ async def publish(repo: str, slug: str, tar_bytes: bytes, entry: str, company_na
     await _git(root, "push", "-q")
 
 
+class _Assets(HTMLParser):
+    """Files a page loads: src and srcset on any tag, and <link href>.
+    Attributes are parsed, so single-quoted and unquoted values count."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.refs: set[str] = set()
+
+    def handle_starttag(self, tag, attrs):
+        a = {k.lower(): (v or "").strip() for k, v in attrs}
+        if a.get("src"):
+            self.refs.add(a["src"])
+        for part in a.get("srcset", "").split(","):
+            if part.split():
+                self.refs.add(part.split()[0])
+        if tag == "link" and a.get("href"):
+            self.refs.add(a["href"])
+
+
+def asset_refs(html: str) -> set[str]:
+    parser = _Assets()
+    parser.feed(html)
+    return parser.refs
+
+
 async def is_live(url: str, client: httpx.AsyncClient | None = None) -> bool:
     """The page and every relative image/script/style it uses answer 200."""
     own = client is None
@@ -305,11 +330,8 @@ async def is_live(url: str, client: httpx.AsyncClient | None = None) -> bool:
         page = await client.get(url)
         if page.status_code != 200:
             return False
-        # Files the page loads: every src, and hrefs to assets (not nav links).
-        refs = set(re.findall(r'\bsrc="([^"]+)"', page.text)) | {
-            h for h in re.findall(r'\bhref="([^"]+)"', page.text)
-            if re.search(r'\.(?:css|js|ico|png|jpe?g|gif|webp|svg|avif|woff2?)(?:[?#]|$)', h, re.I)}
-        refs = {r for r in refs if not re.match(r'(?:[a-z][a-z0-9+.-]*:|//|#)', r, re.I)}
+        refs = {r for r in asset_refs(page.text)
+                if not re.match(r'(?:[a-z][a-z0-9+.-]*:|//|#)', r, re.I)}
         base = str(page.url)
         for ref in refs:
             r = await client.get(httpx.URL(base).join(ref))
