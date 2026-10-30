@@ -192,6 +192,16 @@ SIGNAL_CATALOG: list[dict] = [
         "confidence_floor": 0.0,
     },
     {
+        "code": "OUTDATED_SITE",
+        "label": "Outdated website",
+        "description": "The homepage shows a concrete sign of age: no mobile layout, no HTTPS, an old copyright year, Flash, frames, or an old WordPress/jQuery. The text names each problem, so an email can point at what the owner can see.",
+        "category": "profile",
+        "value_type": "bool",
+        "collector": "profile",
+        "cost_note": "free (homepage HTML)",
+        "confidence_floor": 0.0,
+    },
+    {
         "code": "NO_ONLINE_BOOKING",
         "label": "No online booking/scheduling",
         "description": "No booking or scheduling widget detected — leads have to phone in, so after-hours demand is lost.",

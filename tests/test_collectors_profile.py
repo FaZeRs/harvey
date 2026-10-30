@@ -289,3 +289,119 @@ async def test_profile_uses_homepage_brand_over_service_location_title(
         await c.run([{"id": cid, "name": current, "domain": domain}])
     assert (await state.get_company_by_domain(domain)).name == brand
     assert (await state.get_prospect(pid)).company == brand
+
+
+# ── outdated website (what a redesign pitch can name) ──
+
+from datetime import date
+
+from harvey.collectors.profile import outdated_site
+
+MODERN = ('<html><head><meta name="viewport" content="width=device-width">'
+          '<script src="/js/jquery-migrate.min.js?ver=1.4.1"></script></head>'
+          '<body><p><font style="color:red">Hi</font></p>'
+          '<footer>© 2018–2026 Example Hotel</footer></body></html>')
+
+
+def test_modern_site_is_not_outdated():
+    assert outdated_site(MODERN, "https://example.com", date(2026, 10, 30)) == ([], 1.0)
+
+
+def test_each_visible_problem_is_named():
+    html = ('<html><body><frameset></frameset>'
+            '<font face="Arial"><center>a</center><font color="red">b</font></font>'
+            '<embed src="intro.swf">'
+            '<meta name="generator" content="WordPress 4.9.8">'
+            '<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>'
+            '<footer>Copyright &copy; 2016 Example</footer></body></html>')
+    issues, conf = outdated_site(html, "http://example.com", date(2026, 10, 30))
+    text = "; ".join(issues)
+    for part in ("mobile", "HTTPS", "2016", "Flash", "frames", "1990s", "WordPress 4.9", "jQuery 1.x"):
+        assert part in text, part
+    assert conf == 0.9
+
+
+def test_stale_footer_alone_is_low_confidence():
+    html = MODERN.replace("2018–2026", "2021")
+    issues, conf = outdated_site(html, "https://example.com", date(2026, 10, 30))
+    assert issues == ["footer copyright still says 2021"] and conf == 0.6
+
+
+@pytest.mark.asyncio
+async def test_outdated_site_recorded_when_confirmed(state):
+    await seed_signal_catalog(state)
+    await state.set_signal_status("OUTDATED_SITE", "confirmed")
+    c = collector(await state.confirmed_signal_codes())
+
+    async def fake_get(url):
+        return "<html><body>Welcome</body></html>" if url.startswith("http://") else ""
+    c._get = fake_get
+    c.challenged = set()
+    c.state = state
+
+    cid = await state.add_company(Company(name="Acme", domain="acme.com"))
+    obs = await c.profile_company(cid, "acme.com")
+    [o] = [o for o in obs if o["signal_code"] == "OUTDATED_SITE"]
+    assert o["value_num"] == 1 and "HTTPS" in o["value_text"] and "mobile" in o["value_text"]
+
+
+@pytest.mark.asyncio
+async def test_writer_reads_latest_outdated_finding(state):
+    from harvey.agents.writer import Writer
+    await seed_signal_catalog(state)
+    w = Writer.__new__(Writer)
+    w.state = state
+    cid = await state.add_company(Company(name="Acme", domain="acme.com"))
+    assert await w._outdated_site(cid) == ""
+    await state.add_observation("OUTDATED_SITE", company_id=cid, collector="profile",
+                                value_num=1, value_text="footer copyright still says 2016")
+    assert await w._outdated_site(cid) == "footer copyright still says 2016"
+
+
+def test_copyright_year_before_symbol():
+    html = MODERN.replace("© 2018–2026 Example Hotel", "2014 © EXAMPLE")
+    assert outdated_site(html, "https://example.com", date(2026, 10, 30))[0] == [
+        "footer copyright still says 2014"]
+
+
+def test_viewport_with_spaces_around_equals_is_mobile_friendly():
+    html = MODERN.replace('name="viewport"', 'name = "viewport"')
+    assert outdated_site(html, "https://example.com", date(2026, 10, 30)) == ([], 1.0)
+
+
+class _Resp:
+    def __init__(self, url, text):
+        self.url, self.text, self.status_code = url, text, 200
+        self.headers = {"content-type": "text/html"}
+
+
+class _Client:
+    """Answers every request, after 'redirecting' to ``redirects[url]``."""
+    def __init__(self, redirects, html):
+        self.redirects, self.html = redirects, html
+
+    async def get(self, url):
+        return _Resp(self.redirects.get(url, url), self.html)
+
+
+async def _outdated_obs(state, redirects):
+    await seed_signal_catalog(state)
+    await state.set_signal_status("OUTDATED_SITE", "confirmed")
+    c = ProfileCollector(state, await state.confirmed_signal_codes())
+    c._client = _Client(redirects, MODERN)
+    cid = await state.add_company(Company(name="Acme", domain="example.com"))
+    [o] = [o for o in await c.profile_company(cid, "example.com")
+           if o["signal_code"] == "OUTDATED_SITE"]
+    return o
+
+
+@pytest.mark.asyncio
+async def test_https_redirected_to_http_is_not_secure(state):
+    o = await _outdated_obs(state, {"https://example.com": "http://example.com/"})
+    assert o["value_num"] == 1 and "HTTPS" in o["value_text"]
+
+
+@pytest.mark.asyncio
+async def test_secure_final_url_is_not_flagged(state):
+    o = await _outdated_obs(state, {})
+    assert o["value_num"] == 0
