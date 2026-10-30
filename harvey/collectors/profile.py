@@ -811,14 +811,14 @@ def outdated_site(html: str, site: str, today: date | None = None) -> tuple[list
     plus a confidence. ([], 1.0) means checked and nothing found.
 
     Only what the HTML proves: a missing viewport tag, no HTTPS (``site`` is
-    the base that answered, and https is always tried first), an old
+    the URL the homepage was finally served from, after redirects), an old
     copyright year, Flash, frames, 1990s tags, or an old WordPress/jQuery.
     """
     today = today or date.today()
     code = _strip_code(html)
     issues: list[str] = []
     strong = False
-    if not re.search(r"""(?i)<meta[^>]+name=["']?viewport""", html):
+    if not re.search(r"""(?i)<meta[^>]+name\s*=\s*["']?viewport""", html):
         issues.append("not mobile-friendly (no mobile viewport)")
         strong = True
     if site.startswith("http://"):
@@ -869,6 +869,8 @@ class ProfileCollector:
         # Hosts that answered with a bot challenge (SiteGround's 202,
         # Cloudflare's "Just a moment...") rather than a page.
         self.challenged: set[str] = set()
+        # Requested URL -> the URL that finally answered, after redirects.
+        self.final_urls: dict[str, str] = {}
 
     def wants(self, code: str) -> bool:
         return code in self.confirmed
@@ -897,6 +899,7 @@ class ProfileCollector:
             return ""
         if resp.status_code != 200:
             return ""
+        self.final_urls[url] = str(resp.url)
         ctype = resp.headers.get("content-type", "")
         if "html" not in ctype and "xml" not in ctype and "text" not in ctype:
             return ""
@@ -1184,7 +1187,10 @@ class ProfileCollector:
 
         # Visible age: what a website redesign pitch can name
         if self.wants("OUTDATED_SITE"):
-            issues, conf = outdated_site(home, site)
+            # The scheme that served the page, not the one first tried: an
+            # http:// guess can redirect to https, and https to http.
+            served = getattr(self, "final_urls", {}).get(site, site)
+            issues, conf = outdated_site(home, served)
             add("OUTDATED_SITE", num=1 if issues else 0, text="; ".join(issues), conf=conf)
 
         # The About page, fetched once for the startup signals below.

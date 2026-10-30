@@ -362,3 +362,46 @@ def test_copyright_year_before_symbol():
     html = MODERN.replace("© 2018–2026 Example Hotel", "2014 © EXAMPLE")
     assert outdated_site(html, "https://example.com", date(2026, 10, 30))[0] == [
         "footer copyright still says 2014"]
+
+
+def test_viewport_with_spaces_around_equals_is_mobile_friendly():
+    html = MODERN.replace('name="viewport"', 'name = "viewport"')
+    assert outdated_site(html, "https://example.com", date(2026, 10, 30)) == ([], 1.0)
+
+
+class _Resp:
+    def __init__(self, url, text):
+        self.url, self.text, self.status_code = url, text, 200
+        self.headers = {"content-type": "text/html"}
+
+
+class _Client:
+    """Answers every request, after 'redirecting' to ``redirects[url]``."""
+    def __init__(self, redirects, html):
+        self.redirects, self.html = redirects, html
+
+    async def get(self, url):
+        return _Resp(self.redirects.get(url, url), self.html)
+
+
+async def _outdated_obs(state, redirects):
+    await seed_signal_catalog(state)
+    await state.set_signal_status("OUTDATED_SITE", "confirmed")
+    c = ProfileCollector(state, await state.confirmed_signal_codes())
+    c._client = _Client(redirects, MODERN)
+    cid = await state.add_company(Company(name="Acme", domain="example.com"))
+    [o] = [o for o in await c.profile_company(cid, "example.com")
+           if o["signal_code"] == "OUTDATED_SITE"]
+    return o
+
+
+@pytest.mark.asyncio
+async def test_https_redirected_to_http_is_not_secure(state):
+    o = await _outdated_obs(state, {"https://example.com": "http://example.com/"})
+    assert o["value_num"] == 1 and "HTTPS" in o["value_text"]
+
+
+@pytest.mark.asyncio
+async def test_secure_final_url_is_not_flagged(state):
+    o = await _outdated_obs(state, {})
+    assert o["value_num"] == 0
