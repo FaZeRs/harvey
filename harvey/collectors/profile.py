@@ -797,6 +797,59 @@ def _page_title(html: str) -> str:
     return html_unescape(re.sub(r"(?s)<[^>]+>", " ", " ".join(parts))).lower()
 
 
+# A copyright line: the symbol or word, then up to 40 characters that may
+# hold a year range ("© 2012–2017 Acme").
+# Also "2014 © Acme", with the year just before the symbol.
+_COPYRIGHT = re.compile(r"(?i)(?:\b(?:19|20)\d{2}\s*)?(?:©|&copy;|&#169;|\bcopyright\b)[^<]{0,40}")
+# <font face/color/size=...> is hand-written 1990s HTML; modern rich-text
+# editors still emit <font style="...">, so that form doesn't count.
+_OLD_HTML = re.compile(r"(?i)<(?:font\s[^>]*\b(?:face|color|size)\s*=|center\b|marquee\b)")
+
+
+def outdated_site(html: str, site: str, today: date | None = None) -> tuple[list[str], float]:
+    """Visible signs a homepage is old, each worded so an email can name it,
+    plus a confidence. ([], 1.0) means checked and nothing found.
+
+    Only what the HTML proves: a missing viewport tag, no HTTPS (``site`` is
+    the base that answered, and https is always tried first), an old
+    copyright year, Flash, frames, 1990s tags, or an old WordPress/jQuery.
+    """
+    today = today or date.today()
+    code = _strip_code(html)
+    issues: list[str] = []
+    strong = False
+    if not re.search(r"""(?i)<meta[^>]+name=["']?viewport""", html):
+        issues.append("not mobile-friendly (no mobile viewport)")
+        strong = True
+    if site.startswith("http://"):
+        issues.append("no HTTPS, so browsers mark it 'Not secure'")
+        strong = True
+    years = [int(y) for m in _COPYRIGHT.finditer(html_unescape(code))
+             for y in re.findall(r"\b(?:19|20)\d{2}\b", m.group(0))]
+    years = [y for y in years if y <= today.year]
+    if years and max(years) <= today.year - 3:
+        issues.append(f"footer copyright still says {max(years)}")
+    if re.search(r"(?i)\.swf\b|x-shockwave-flash", html):
+        issues.append("uses Flash, which no browser plays any more")
+        strong = True
+    if re.search(r"(?i)<frameset\b", code):
+        issues.append("built with frames")
+        strong = True
+    if len(_OLD_HTML.findall(code)) >= 3:
+        issues.append("built with 1990s-era HTML (font/center tags)")
+        strong = True
+    wp = re.search(r"""(?i)<meta[^>]+content=["']WordPress\s+(\d+)\.(\d+)""", html)
+    if wp and int(wp.group(1)) < 5:
+        issues.append(f"runs WordPress {wp.group(1)}.{wp.group(2)}, several major versions behind")
+        strong = True
+    # jquery-1.11.3.min.js, ajax/libs/jquery/1.12.4/, jquery.min.js?ver=1.12.4;
+    # never jquery-migrate, whose own 1.x versions say nothing about age.
+    if re.search(r"(?i)\bjquery(?:-|/|(?:\.min)?\.js\?ver=)1\.\d+", html):
+        issues.append("loads jQuery 1.x, a library version from before 2016")
+    # A stale footer or old jQuery alone is often just neglect on a fine site.
+    return issues, (0.9 if strong else 0.6) if issues else 1.0
+
+
 class ProfileCollector:
     """Fetches a business's public pages and emits observations.
 
@@ -1128,6 +1181,11 @@ class ProfileCollector:
 
         # Booking gap
         add("NO_ONLINE_BOOKING", num=0 if self._any(home, BOOKING_HINTS) else 1)
+
+        # Visible age: what a website redesign pitch can name
+        if self.wants("OUTDATED_SITE"):
+            issues, conf = outdated_site(home, site)
+            add("OUTDATED_SITE", num=1 if issues else 0, text="; ".join(issues), conf=conf)
 
         # The About page, fetched once for the startup signals below.
         about_page: list[tuple[str, str]] = []

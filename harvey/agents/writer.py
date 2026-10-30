@@ -245,6 +245,18 @@ class Writer:
         a raise it announced; see harvey.startups), else None."""
         return await startup_facts(getattr(self, "state", None), company_id)
 
+    async def _outdated_site(self, company_id) -> str:
+        """The latest OUTDATED_SITE finding's wording ("" when none). A failed
+        read is just "nothing known", never a reason not to write."""
+        if not company_id:
+            return ""
+        try:
+            rows = await self.state.get_observations(
+                company_id=company_id, signal_code="OUTDATED_SITE", latest_only=True, limit=1)
+        except Exception:
+            return ""
+        return (rows[0].get("value_text") or "") if rows and rows[0].get("value_num") == 1 else ""
+
     def _startup_playbook(self) -> str:
         """skills/selling_to_startups.md, for startup prospects ("" if absent)."""
         text = self.brain.load_skill("selling_to_startups") if hasattr(self.brain, "load_skill") else ""
@@ -308,6 +320,9 @@ class Writer:
                 )
         if prospect.personalization_notes:
             facts.append(f"- Research notes: {prospect.personalization_notes}")
+        outdated = await self._outdated_site(prospect.company_id)
+        if outdated:
+            facts.append(f"- Their website, as we checked it: {outdated}")
         startup = await self._startup(prospect.company_id)
         if startup is not None:
             facts.extend(startup)

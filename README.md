@@ -201,7 +201,7 @@ you need the Codex provider.
 
 This is the part that makes Harvey different from a black box, and it is deliberately not skippable.
 
-Harvey knows how to collect **29 signals** about a business. It does not collect any of them until you say so. On first run it *proposes* the catalog; you confirm, skip, or reject each one in the dashboard or from the terminal:
+Harvey knows how to collect **30 signals** about a business. It does not collect any of them until you say so. On first run it *proposes* the catalog; you confirm, skip, or reject each one in the dashboard or from the terminal:
 
 ```bash
 harvey signals                       # review the catalog
@@ -222,6 +222,7 @@ Every signal shows what it is in plain language, **what it costs**, and how many
 | | `RUNNING_GOOGLE_ADS` / `RUNNING_META_ADS` | They are spending on acquisition *today*. The strongest budget signal available for free. |
 | | `NO_ONLINE_BOOKING` | Leads have to phone in, so after-hours demand is lost. |
 | | `NO_SCHEMA_MARKUP` | A concrete, checkable SEO gap you can name in an email. |
+| | `OUTDATED_SITE` | The homepage shows its age: no mobile layout, no HTTPS, an old copyright year, Flash, frames, or an old WordPress/jQuery. Each problem is named, so the email can point at what the owner sees. |
 | | `BLOG_STALE` | Content marketing started and abandoned. |
 | | `SITE_PAGE_COUNT`, `TECH_STACK`, `BLOCKS_AI_CRAWLERS` | Size, platform, AI-search visibility. |
 | | `HIRING_ROLE` / `OPEN_ROLES` | What they're hiring for, and how many roles are open. When their site links a Greenhouse, Lever, Ashby or Workable board, Harvey reads that board's public feed (one request): roles matching `icp.hiring_signals` (else `icp.titles`), with department, location, posting date and the posting's URL; when the board lists none, it records "not hiring" so a closed role stops counting. Otherwise it reads the careers page. Set `hiring_signals` to the roles that mean they're buying: the `titles` fallback names who you email, so "CEO" only matches a CEO opening (never "Assistant to the CEO"), which is rarely the signal you want. |
