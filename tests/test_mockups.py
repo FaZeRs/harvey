@@ -288,3 +288,22 @@ async def test_call_keeps_the_session_open_until_the_answer(tmp_path):
     od = mockups.OpenDesign("h", "k")
     od.base = [sys.executable, str(server)]          # "mcp" is passed as an ignored arg
     assert await od.call("get_run", {"runId": "r1"}) == {"ok": True}
+
+
+def test_build_preview_refuses_an_entry_outside_the_project(tmp_path):
+    outside = tmp_path / "secret.html"
+    outside.write_text("<html><head></head></html>")
+    tb = tar_of({"./home.html": b"<html><head></head></html>"})
+    with pytest.raises(mockups.RunFailed):
+        mockups.build_preview(tb, str(outside), tmp_path / "out")
+
+
+@pytest.mark.asyncio
+async def test_second_reply_joins_the_held_answer(state):
+    handler = await held_reply(state)
+    p = await state.get_prospect_by_email("jane@acme.example")
+    await handler._process_reply(p.email, "Also, what does it cost?", "",
+                                 reply_meta={"subject": "Hi", "message_id": "<m2@x>"})
+    assert await state.get_outbox(status="pending_review") == []
+    [cid] = json.loads(await state.get_setting(mockups.JOBS_KEY))
+    assert (await mockups.get_job(state, cid))["reply_meta"]["message_id"] == "<m2@x>"

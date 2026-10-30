@@ -423,8 +423,10 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
 
             # Mock-ups for interested prospects: after the handler (which
             # starts them) and before sending (which sends the answer they
-            # held back). A failure here never stops the cycle.
-            if config.mockups.enabled and not send_only:
+            # held back). Runs in quiet hours too, like reply handling, so a
+            # job started late in the day isn't timed out overnight. A
+            # failure here never stops the cycle.
+            if config.mockups.enabled:
                 try:
                     from harvey import mockups
                     await mockups.process(state, config, handler)

@@ -44,6 +44,7 @@ MCP_PROTOCOL = "2025-06-18"
 SKILL = "redesign-existing-projects"
 NOINDEX = '<meta name="robots" content="noindex, nofollow">'
 PROJECT_ID = re.compile(r"^harvey-[a-z0-9-]{1,60}$")
+OPEN_STATUSES = ("queued", "running", "published", "live")   # answer still held
 
 
 class MockupError(Exception):
@@ -259,9 +260,11 @@ def build_preview(tar_bytes: bytes, entry: str, out_dir: Path):
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp)
         _safe_extract(tar_bytes, src)
-        page = src / entry
-        if not page.is_file() or page.suffix.lower() != ".html":
-            raise MockupError(f"entry file {entry!r} missing from the project")
+        page = (src / entry).resolve()
+        # entry comes from OpenDesign: never read a page from outside the project.
+        if (not page.is_relative_to(src.resolve()) or not page.is_file()
+                or page.suffix.lower() != ".html"):
+            raise RunFailed(f"entry file {entry!r} missing from the project")
         html = page.read_text(encoding="utf-8", errors="replace")
         if "noindex" not in html:
             html = re.sub(r"(?i)<head([^>]*)>", lambda m: f"<head{m.group(1)}>\n{NOINDEX}", html, count=1)
@@ -302,7 +305,11 @@ async def is_live(url: str, client: httpx.AsyncClient | None = None) -> bool:
         page = await client.get(url)
         if page.status_code != 200:
             return False
-        refs = set(re.findall(r'(?:src|href)="((?!https?:|data:|mailto:|tel:|#)[^"]+)"', page.text))
+        # Files the page loads: every src, and hrefs to assets (not nav links).
+        refs = set(re.findall(r'\bsrc="([^"]+)"', page.text)) | {
+            h for h in re.findall(r'\bhref="([^"]+)"', page.text)
+            if re.search(r'\.(?:css|js|ico|png|jpe?g|gif|webp|svg|avif|woff2?)(?:[?#]|$)', h, re.I)}
+        refs = {r for r in refs if not re.match(r'(?:[a-z][a-z0-9+.-]*:|//|#)', r, re.I)}
         base = str(page.url)
         for ref in refs:
             r = await client.get(httpx.URL(base).join(ref))
@@ -330,8 +337,12 @@ async def process(state, config, handler, od: OpenDesign | None = None) -> int:
         if not job:
             await _drop_job(state, convo_id)
             continue
+        expired = _now() - datetime.fromisoformat(job["created_at"]) > timedelta(minutes=cfg.timeout_minutes)
         try:
-            done = await _step(state, cfg, od, job, config.persona.company)
+            if expired and job["status"] == "queued":
+                done = False        # too late to start a run; answer without one
+            else:
+                done = await _step(state, cfg, od, job, config.persona.company)
         except RunFailed as e:
             logger.warning(f"Mockups: {job['slug']}: {e}")
             job["error"], done = str(e)[:300], True
@@ -339,14 +350,18 @@ async def process(state, config, handler, od: OpenDesign | None = None) -> int:
             # SSH, git or network trouble: try again next cycle, until timeout.
             logger.warning(f"Mockups: {job['slug']}: {e} (will retry)")
             job["error"], done = str(e)[:300], False
-        expired = _now() - datetime.fromisoformat(job["created_at"]) > timedelta(minutes=cfg.timeout_minutes)
         if not done and expired:
             job["error"] = job["error"] or f"not live after {cfg.timeout_minutes} minutes"
             done = True
         await save_job(state, job)
         if done:
             url = job["url"] if job["status"] == "live" else ""
-            await handler.answer_after_mockup(job, url)
+            try:
+                await handler.answer_after_mockup(job, url)
+            except Exception as e:
+                # e.g. the brain paused: the job stays open, answered next cycle.
+                logger.warning(f"Mockups: {job['slug']}: answer failed: {e} (will retry)")
+                continue
             job["status"] = "answered" if url else "answered_without"
             await save_job(state, job)
             await _drop_job(state, convo_id)
@@ -361,7 +376,9 @@ async def _step(state, cfg, od: OpenDesign, job: dict, persona_company: str) -> 
     """Advance one job. True when it's finished (live or given up)."""
     project = f"harvey-{job['slug']}"
     if job["status"] == "queued":
-        await od.call("create_project", {"id": project, "name": f"Harvey: {job['company']['name']}"})
+        if not job.get("project_created"):   # a retry after start_run failed
+            await od.call("create_project", {"id": project, "name": f"Harvey: {job['company']['name']}"})
+            job["project_created"] = True
         run = await od.call("start_run", {
             "project": project, "requestId": str(uuid.uuid4()), "agent": cfg.agent,
             "skill": SKILL, "prompt": brief(job["company"], persona_company)})
@@ -384,10 +401,11 @@ async def _step(state, cfg, od: OpenDesign, job: dict, persona_company: str) -> 
         job["status"] = "published"
     if job["status"] == "published":
         # The deploy usually lands within a minute or two of the push.
-        for _ in range(8):
+        for attempt in range(8):
+            if attempt:
+                await asyncio.sleep(15)
             if await is_live(job["url"]):
                 job["status"] = "live"
                 return True
-            await asyncio.sleep(15)
         return False
     return job["status"] == "live"

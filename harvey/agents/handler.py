@@ -533,13 +533,22 @@ class Handler:
         # An interested prospect with an outdated site gets a mock-up first:
         # the answer is drafted when it's live (mockups.process), with the link.
         mockup_for = None
-        if intent == "interested" and self.is_native and not held and not listed:
+        # A reply while a mock-up is still being made joins the answer that
+        # job holds, so the prospect doesn't get two answers.
+        pending_mockup = None
+        if self.is_native and stored is not None and intent in AUTO_REPLY_INTENTS:
+            pending_mockup = await mockups.get_job(self.state, stored.id)
+            if pending_mockup and pending_mockup.get("status") not in mockups.OPEN_STATUSES:
+                pending_mockup = None
+        if (intent == "interested" and self.is_native and not held and not listed
+                and not pending_mockup):
             try:
                 mockup_for = await mockups.eligible(self.state, self.config, prospect)
             except Exception as e:
                 logger.warning(f"Handler: mock-up check failed for {lead_email}: {e}")
         response = ""
-        if intent in AUTO_REPLY_INTENTS and not held and not listed and not mockup_for:
+        if (intent in AUTO_REPLY_INTENTS and not held and not listed
+                and not mockup_for and not pending_mockup):
             response = await self._generate_response(intent, reply_text, prospect, convo)
 
         # 2c. Store the conversation in one write.
@@ -636,6 +645,13 @@ class Handler:
                                     reply_text, reply_meta or {})
             logger.info(f"Handler: {lead_email} is interested. Making a homepage mock-up "
                         f"for {mockup_for['name']}; the answer follows when it's live.")
+            return
+
+        if pending_mockup:
+            pending_mockup.update(reply_text=reply_text, reply_meta=reply_meta or {})
+            await mockups.save_job(self.state, pending_mockup)
+            logger.info(f"Handler: {lead_email} wrote again while their mock-up is being "
+                        "made; one answer follows when it's ready.")
             return
 
         # For interested, objection, question, wrong_person — the reply drafted above
