@@ -188,3 +188,12 @@ def test_status_still_works_when_the_config_is_invalid(tmp_path, monkeypatch, ca
     monkeypatch.setattr(harvey.config, "load_config", invalid)
     cmd_status(SimpleNamespace(check=False))
     assert "Prospects:" in capsys.readouterr().out
+
+
+def test_httpx_request_urls_are_not_logged():
+    """Some APIs take their key in the URL; httpx logs URLs at INFO."""
+    import logging
+
+    import harvey.main  # noqa: F401  (configures logging on import)
+
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)

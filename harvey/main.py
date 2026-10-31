@@ -27,6 +27,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("harvey")
+# httpx logs every request URL at INFO, and some APIs (Hunter, Reoon) take
+# their key as a query parameter.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Backoff for consecutive failed cycles: 60s, 120s, 240s, ... capped at 15 min
 ERROR_BACKOFF_BASE = 60
