@@ -40,7 +40,8 @@ from harvey.brain import Brain
 from harvey.collectors import people as people_mod
 from harvey.collectors.discover import site_name_from_html
 from harvey.collectors.profile import _reads_like_title, looks_like_challenge
-from harvey.config import HarveyConfig, EnvConfig
+from harvey.config import HarveyConfig, EnvConfig, live_do_not_contact
+from harvey.gate import do_not_contact_domain_match, do_not_contact_match
 from harvey.integrations.email_finder import (
     DEFAULT_PATTERN, SMALL_BUSINESS_PATTERN, find_email, site_email_evidence,
     verify_published_address,
@@ -221,10 +222,22 @@ class Scout:
             f"|{prospect.company.lower().strip()}"
         )
 
+    def _never_contact(self, email: str = "", domain: str = "") -> str:
+        """The do-not-contact entry this address or company domain falls
+        under, or "". The gate blocks the send anyway; this stops Harvey
+        spending lookups and drafts on someone it will never email."""
+        entries = live_do_not_contact(self.config)
+        return ((email and do_not_contact_match(email, entries))
+                or (domain and do_not_contact_domain_match(domain, entries)) or "")
+
     async def _is_duplicate_prospect(self, prospect: Prospect) -> bool:
-        """True if we've already seen this prospect this cycle or in the DB."""
+        """True if we've already seen this prospect this cycle or in the DB,
+        or the operator has put them on the do-not-contact list."""
         key = self._prospect_key(prospect)
         if key in self._seen_prospect_keys:
+            return True
+        if self._never_contact(email=prospect.email):
+            self._seen_prospect_keys.add(key)
             return True
         try:
             if await self.state.prospect_exists(
@@ -594,7 +607,7 @@ class Scout:
         count = 0
         for company in companies:
             domain = (company.get("domain") or "").strip()
-            if not domain:
+            if not domain or self._never_contact(domain=domain):
                 continue
 
             if await hunter_searches_remaining(self.state) <= 0:
@@ -682,7 +695,7 @@ class Scout:
         count = 0
         for company in companies:
             domain = (company.get("domain") or "").strip()
-            if not domain:
+            if not domain or self._never_contact(domain=domain):
                 continue
 
             contacts = await self._contacts_from_company(
