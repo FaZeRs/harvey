@@ -22,8 +22,11 @@ When an agent runs, it calls `brain.load_skills_for_agent("agent_name")` which c
 | `product_knowledge.md` | x | x | x | x | x |
 | `competitive_intel.md` | | x | x | | |
 | `selling_to_startups.md` | | x* | x* | | |
+| `house_style.md` | | x† | x† | | |
 
 \* Only for prospects whose company is a startup by its own site's account (the `YC_BACKED` or `ACCELERATOR` signal, or a `FUNDING_ROUND` from the last 18 months), not loaded for everyone.
+
+† Only if you create it.
 
 ## Built-in Skills
 
@@ -44,6 +47,13 @@ These are created by `harvey train <url>` and are specific to your product:
 
 - **`product_knowledge.md`** — Features, benefits, pricing, use cases, pain points, buying triggers
 - **`competitive_intel.md`** — Battle cards for each competitor, differentiation angles, migration paths
+
+## Your Own House Style (optional)
+
+Create `skills/house_style.md` for rules about how *your* emails should read: the language
+to write in, a style guide, a glossary of preferred terms, phrasings to avoid. The writer
+and the reply handler load it; if it doesn't exist, nothing changes. It's gitignored,
+like `product_knowledge.md`, since it's specific to your business.
 
 ## Adding or Editing Skills
 

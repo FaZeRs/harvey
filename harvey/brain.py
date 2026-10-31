@@ -23,6 +23,8 @@ from harvey.textio import read_user_text
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 SKILLS_DIR = PROJECT_ROOT / "skills"
+# Skills an operator adds for their own business; skipped quietly when absent.
+OPTIONAL_SKILLS = {"house_style"}
 
 # Subprocess safety limits
 DEFAULT_TIMEOUT_SECONDS = 300  # a single Claude call should never hang forever
@@ -715,8 +717,8 @@ class Brain:
         # and loaded by every agent that needs product context
         skill_map = {
             "scout": ["prospecting_tactics", "lead_qualification", "account_navigation", "signal_playbook", "product_knowledge"],
-            "writer": ["email_frameworks", "signal_playbook", "sales_methodology", "offer_strategy", "product_knowledge", "competitive_intel"],
-            "handler": ["objection_handling", "sales_methodology", "offer_strategy", "product_knowledge", "competitive_intel"],
+            "writer": ["email_frameworks", "signal_playbook", "sales_methodology", "offer_strategy", "product_knowledge", "competitive_intel", "house_style"],
+            "handler": ["objection_handling", "sales_methodology", "offer_strategy", "product_knowledge", "competitive_intel", "house_style"],
             "sender": ["email_frameworks", "product_knowledge"],
             "linkedin": ["linkedin_outreach", "prospecting_tactics", "product_knowledge"],
         }
@@ -727,6 +729,9 @@ class Brain:
 
         sections = []
         for name in skill_names:
+            # house_style is the operator's own, optional: most installs have none.
+            if name in OPTIONAL_SKILLS and not (SKILLS_DIR / f"{name}.md").exists():
+                continue
             content = self.load_skill(name)
             if content:
                 sections.append(content)
