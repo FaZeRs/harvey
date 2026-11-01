@@ -154,6 +154,21 @@ async def test_interested_reply_waits_for_the_mockup(state, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_no_mockup_for_a_conversation_handed_to_you(state):
+    """A conversation with you stays with you: interest there starts no mock-up."""
+    from harvey.models.conversation import Conversation
+    _, p = await seed(state)
+    await state.add_conversation(Conversation(id="", prospect_id=p.id, channel="email",
+                                              status="needs_human"))
+    handler = make_handler(state, FakeProvider(), intent="interested")
+    handler.config = MCfg()
+    await handler._process_reply(p.email, "Actually yes, interested!", "",
+                                 reply_meta={"subject": "Hi", "message_id": "<m1@x>"})
+    assert json.loads(await state.get_setting(mockups.JOBS_KEY) or "[]") == []
+    assert await state.get_outbox(status="pending_review") == []
+
+
+@pytest.mark.asyncio
 async def test_interested_reply_without_outdated_site_is_answered_now(state):
     _, p = await seed(state, outdated=False)
     handler = make_handler(state, FakeProvider(), intent="interested")

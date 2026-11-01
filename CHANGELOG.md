@@ -9,12 +9,37 @@ minor versions can still change behaviour.
 
 ### Added
 
+- **Your own email shape** (`writer.email_rules`). Point it at a markdown file
+  (`skills/email_rules.md` is gitignored) and its rules replace the Writer's
+  built-in shape, which ends every prompt and so beat anything in the skills:
+  email 1 under 75 words, an observation and a question, no pitch, no link.
+  It covers the per-person first email and the 3-email sequence. It never
+  lifts the FACTS rule, and the send gate (220 words, one link,
+  do-not-contact) still applies. The prompt now says what Harvey really adds
+  when it sends: with `compliance.opt_out_line` set, the draft gets no second
+  opt-out sentence; with it empty, an opt-out sentence the rules ask for is
+  written into the body. A file that's set but missing, empty or too long
+  stops the Writer, so it never drafts in the shape you replaced. Unset,
+  nothing changes.
+
 - **Scavio discovery providers** (`scavio_maps`, `scavio_search`). Google Maps
   listings around each city, with phone, website, category, rating and review
   count, and Google organic results with rank, both from one
   `SCAVIO_API_KEY`. Maps is 1 credit per 20 businesses and Search 1 credit per
   10 results; estimates use the $0.01 pay-as-you-go credit price. Off unless
   you pick one in `harvey discover` or the dashboard. Closes #28.
+- **Sent emails on the Conversations tab.** A new *Awaiting reply* filter
+  lists people Harvey recently emailed who haven't answered yet (from its
+  latest 2,000 sent emails), with each sent
+  email and when it went out, so the tab shows every outbound thread instead
+  of only the ones that got a reply. When a reply arrives the card is
+  replaced by the real conversation, which already shows those emails. The
+  cards are read-only and create no conversation rows. The API change is
+  opt-in: `/api/conversations?awaiting=1` adds them, and the endpoint without
+  the parameter returns exactly what it did before. *Open* still means reply
+  conversations only. A card for a general inbox (no person's name) shows
+  the company name instead of "Unknown". People who replied, opted out or
+  bounced, and colleagues of anyone who replied, aren't listed.
 - **TrulyInbox for warmup.** Harvey now recommends TrulyInbox for warming and
   keeping sending mailboxes healthy, and reads it: `harvey trulyinbox connect`
   (or the new warmup step on the dashboard's setup checklist) checks a key and
@@ -263,6 +288,22 @@ minor versions can still change behaviour.
 
 ### Fixed
 
+- **OpenStreetMap discovery survives a bad afternoon** (from #125). A 500, 502 or
+  503 from one Overpass mirror now moves on to the next instead of ending the
+  search, Overpass gets enough time to get through its queue, and the mirror
+  list drops one that was the same machine as another. `scripts/diagnose_overpass.py`
+  re-checks the mirrors.
+- **Hebrew opt-outs are honored without the model** (from #134). A reply like
+  "הסר", "תורידו אותי מהרשימה" or "לא תודה" now opts out as its English
+  equivalent does, and `compliance.opt_out_line` can ask for a Hebrew reply.
+- **Harvey keeps prospecting when it can't send or is waiting on a reply**
+  (from #128, #126). A draft that couldn't deploy (email channel off, or native
+  sending paused) or any open conversation used to win every cycle, so Harvey
+  stopped writing and finding prospects. Replies are now read alongside
+  whatever the cycle does, still before anything is sent. An auto-reply now
+  goes to **Needs you**. A conversation handed to you stays with you: later
+  replies join it and Harvey doesn't answer them until you hand it back. Before,
+  a reply after an escalation started a new conversation Harvey could answer.
 - **Replies remember the whole conversation** (closes #97). A reply was
   written from the last six messages only, so a requirement the prospect
   stated earlier ("synthetic data only, processed in the EU") dropped out
