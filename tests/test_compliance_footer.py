@@ -559,3 +559,147 @@ async def test_template_lines_with_merge_tags_are_recognised_when_quoted(state):
     handler.brain = RecordingBrain("interested")
     await handler._run_native()
     assert handler.brain.prompts  # our pitch's "attorney" didn't escalate
+
+
+# ── Hebrew ──
+
+HEBREW_LINE = 'לא רלוונטי? השיבו "הסר" ולא אפנה שוב.'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    "הסר",
+    "הסירו",
+    "'הסר'",
+    "הסר בבקשה",
+    "הסר, תודה",
+    "הסר\n\nנשלח מה-iPhone שלי",
+    "\u200fהסר\u200f",                       # direction marks around it
+    "הָסֵר",                                  # with vowel points
+    "תורידו אותי מהרשימה בבקשה.",
+    "אפשר להסיר אותי מהרשימה?",
+    "ותורידו אותנו מרשימת התפוצה",
+    "תמחקו את המייל שלי",
+    "תפסיקו לשלוח לי מיילים.",
+    "נא לא לפנות אליי שוב.",
+    "אל תכתבו לי יותר.",
+    "אל תשלחו לי עוד",
+    "אני לא רוצה לקבל יותר מיילים",
+    "לא תודה",
+    "לא מעוניין, תודה.",
+    "לא מעוניינת כרגע, תודה רבה",
+    "תודה, אבל אנחנו לא מעוניינים.",
+], ids=["bare", "bare-plural", "quoted", "please", "thanks", "iphone-signature", "rlm",
+        "niqqud", "take-me-off", "remove-me", "and-take-us-off", "delete-my-email",
+        "stop-sending", "dont-contact-again", "dont-write", "dont-send-more",
+        "dont-want-emails", "no-thanks", "not-interested-thanks", "not-interested-for-now",
+        "thanks-not-interested"])
+async def test_hebrew_opt_outs_are_caught_without_the_model(state, body):
+    status, prompts = await _reply(state, body)
+    assert status == "opted_out" and prompts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    "לא",
+    "הסרתי את הקובץ המצורף, אפשר לשלוח שוב?",
+    "מעוניין, תודה! מתי נוח לדבר?",
+    "זה חודשי, כן או לא, תודה",
+    "מקווה שלא\nתודה",
+    "לא מעוניין לשלם מראש, תודה. אפשר חודשי?",
+    "תודה, לא מעוניין בחבילה הגדולה אבל הקטנה נשמעת טוב",
+    "הסר את סעיף 4 ואני חותם",
+    "אני מבקש הסרה של סעיף הקנס",
+    "הספק הקודם הפסיק לשלוח לנו דוחות, אתם עושים את זה?",
+    "אל תשלחו את החוזה עד שנדבר",
+    "אנחנו עושים הסרת שיער בלייזר, זה מתאים?",
+    "לא רציתי להטריד, אבל יש לי שאלה על המחיר",
+], ids=["no-alone", "i-removed", "interested-thanks", "yes-or-no-thanks", "hope-not-then-thanks",
+        "not-paying-upfront", "not-the-big-package", "remove-a-clause", "removal-of-a-clause",
+        "supplier-stopped", "dont-send-the-contract-yet", "hair-removal", "didnt-want-to-bother"])
+async def test_ordinary_hebrew_is_not_an_opt_out(state, body):
+    status, prompts = await _reply(state, body)
+    assert status != "opted_out" and prompts
+
+
+@pytest.mark.asyncio
+async def test_quoting_our_hebrew_footer_is_not_an_opt_out(state):
+    sent = "הודעה קצרה ופשוטה. שאלה?\n\n" + ADDRESS + "\n" + HEBREW_LINE
+    status, prompts = await _reply_after_sending(
+        state, "כן, בואו נדבר ביום שלישי.\n\nב-יום ג׳ Harvey כתב:\n> " + sent.replace("\n", "\n> "),
+        sent_bodies=[sent], line=HEBREW_LINE)
+    assert status != "opted_out" and prompts
+
+
+def test_every_reply_an_opt_out_line_can_ask_for_is_caught():
+    from harvey.agents.handler import _opt_out_reason
+    from harvey.config import HEBREW_OPT_OUT_WORDS, OPT_OUT_WORDS
+    for word in OPT_OUT_WORDS + HEBREW_OPT_OUT_WORDS:
+        assert _opt_out_reason(word, word), word
+
+
+def test_opt_out_line_can_ask_in_hebrew():
+    import pydantic
+    for good in (HEBREW_LINE, "להסרה השיבו הסר", "להסרה השב 'הסר'",
+                 'ואם זה לא בשבילכם, תגידו לי "לא תודה" ולא אכתוב שוב.',
+                 "השיבו במייל חוזר ״הסר״ ונסיר אתכם.", "ואם לא מתאים, פשוט ענו לא, תודה.",
+                 'בלי לחץ: השיבו "הסר" ולא אפנה שוב.'):
+        assert ComplianceConfig(opt_out_line=good).opt_out_line == good
+    for bad in (
+        "ואם זה לא בשבילכם, תגידו לי ולא אכתוב שוב.",   # names no reply Harvey catches
+        'השיבו "הסרתי"',
+        "תודה שקראתם!",
+        "להסרה לחצו כאן",
+        'להסרה השיבו "הסר" או לחצו כאן',
+        "להסרה: https://example.com/u",
+        "להסרה כתבו ל-remove@example.com",
+    ):
+        with pytest.raises(pydantic.ValidationError):
+            ComplianceConfig(opt_out_line=bad)
+
+
+# ── Review follow-ups ──
+
+from harvey.agents.handler import _opt_out_reason  # noqa: E402
+
+@pytest.mark.parametrize("reply", [
+    "למה לא, תודה",                # why not, thanks: they're interested
+    "למה לא, תודה רבה!",
+    "אשמח לשמוע. אם לא, תודה בכל מקרה",  # if not, thanks anyway
+    "ואם לא, תודה",
+    "עדיין לא, תודה ששאלת",        # not yet, thanks for asking
+    "עוד לא, תודה",
+])
+def test_hebrew_no_that_isnt_no_thanks_keeps_the_lead(reply):
+    assert _opt_out_reason(reply, reply) is None
+
+
+@pytest.mark.parametrize("reply", ["לא תודה", "לא, תודה", "בינתיים לא, תודה", "‏לא תודה‏"])
+def test_hebrew_no_thanks_still_opts_out(reply):
+    assert _opt_out_reason(reply, reply)["rule"] == "no_thanks"
+
+
+@pytest.mark.parametrize("reply", [
+    "אל תפנו אליי לפני ספטמבר, אז נדבר",   # not before September
+    "בבקשה לא לפנות אליי בשבת",            # not on Shabbat
+    "אל תיצרו קשר לפני יום ראשון",         # not before Sunday
+    "אל תשלח לי מייל, תתקשר אליי",         # don't email, call me
+    "אני לא מעוניין לקבל הודעות בוואטסאפ, מייל עדיף",  # no WhatsApp, email's better
+    "אפשר להוריד אותנו לחבילה הבסיסית?",   # move us down to the basic package
+    "אפשר להוריד מהרשימה את סעיף 4?",      # take item 4 off the list
+    "נא להפסיק את המנוי הישן ולעבור לתוכנית החדשה",  # cancel the old plan, move to the new
+    "אם תפסיקו לשלוח חשבוניות ידניות זה יעזור",  # if you stop sending manual invoices
+    "אל תסירו אותי מהרשימה",               # don't remove me
+    "אל תפסיקו לשלוח לי עדכונים",          # don't stop sending updates
+    "מדוע לא, תודה",                       # why not, thanks
+])
+def test_hebrew_that_only_looks_like_an_opt_out_is_left_to_the_model(reply):
+    assert _opt_out_reason(reply, reply) is None
+
+
+@pytest.mark.parametrize("reply", [
+    "אפשר להוריד אותי מהרשימה?", "תפסיקו לשלוח לי", "נא להפסיק", "נא להפסיק לשלוח",
+    "אל תפנו אליי יותר", "הסירו אותי מהרשימה בבקשה. תודה", "נסו לפני כן משהו אחר. תורידו אותי",
+])
+def test_hebrew_opt_outs_still_caught_after_tightening(reply):
+    assert _opt_out_reason(reply, reply) is not None

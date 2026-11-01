@@ -140,3 +140,11 @@ mockups:
   base_url: ""          # where it's served, e.g. https://preview.example.com
   daily_limit: 5
   timeout_minutes: 45
+
+# Optional: your own rules for the emails Harvey drafts (length, structure,
+# what to say about the product, links, subject lines, sign-off), as a
+# markdown file. When set they replace the built-in shape (email 1 under 75
+# words, an observation and a question, no pitch). The send gate still holds
+# every email to 220 words and one link. skills/email_rules.md is gitignored.
+# writer:
+#   email_rules: "skills/email_rules.md"
