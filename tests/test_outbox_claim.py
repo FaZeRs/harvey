@@ -271,3 +271,25 @@ async def test_a_fresh_claim_is_never_swept_whatever_the_timestamp_format(state)
         await db.commit()
     assert await state.fail_stale_sending_outbox() == 0
     assert (await state.get_outbox_item(item_id))["status"] == "sending"
+
+
+@pytest.mark.asyncio
+async def test_rejecting_a_step_rejects_its_later_follow_ups(state):
+    """With email 1 rejected, email 2 would otherwise go out as the first."""
+    pid = await seed_prospect(state)
+    other = await seed_prospect(state, email="joe@other.example")
+
+    def add(p, step, campaign="c1", status="pending_review"):
+        return state.add_outbox_item(
+            prospect_id=p, to_email="x@acme.example", subject="s", body="b",
+            send_at=_now_iso(), campaign_id=campaign, step=step, status=status)
+
+    first, second = await add(pid, 1, status="approved"), await add(pid, 2)
+    third = await add(pid, 3, status="approved")
+    elsewhere = await add(pid, 2, campaign="c2")
+    theirs = await add(other, 2)
+    assert await state.reject_outbox_item(first) == 1
+    status = {i: (await state.get_outbox_item(i))["status"]
+              for i in (second, third, elsewhere, theirs)}
+    assert status == {second: "rejected", third: "rejected",
+                      elsewhere: "pending_review", theirs: "pending_review"}

@@ -1292,8 +1292,20 @@ class StateManager:
                 "WHERE id = ? AND status IN ('pending_review', 'approved')",
                 (_utcnow().isoformat(), len(RECHECK_PREFIX), RECHECK_PREFIX, item_id),
             )
+            changed = cursor.rowcount
+            if changed:
+                # A follow-up waits only while the step before it is queued;
+                # with that step rejected it would go out as the first email.
+                await db.execute(
+                    "UPDATE outbox SET status = 'rejected', updated_at = ? "
+                    "WHERE status IN ('pending_review', 'approved') AND kind = 'sequence' "
+                    "AND EXISTS (SELECT 1 FROM outbox r WHERE r.id = ? AND r.kind = 'sequence' "
+                    "AND r.prospect_id = outbox.prospect_id "
+                    "AND r.campaign_id = outbox.campaign_id AND outbox.step > r.step)",
+                    (_utcnow().isoformat(), item_id),
+                )
             await db.commit()
-            return cursor.rowcount
+            return changed
 
     async def approve_outbox(self, item_id: str | None = None) -> int:
         """Approve one pending item, or ALL pending when item_id is None.
