@@ -607,7 +607,12 @@ class Scout:
         count = 0
         for company in companies:
             domain = (company.get("domain") or "").strip()
-            if not domain or self._never_contact(domain=domain):
+            if not domain:
+                continue
+            if self._never_contact(domain=domain):
+                # Move it to the back of the rotation, or blocked companies
+                # at the front would hold every slot each cycle.
+                await self.state.mark_prospects_checked(company["id"])
                 continue
 
             if await hunter_searches_remaining(self.state) <= 0:
@@ -695,7 +700,12 @@ class Scout:
         count = 0
         for company in companies:
             domain = (company.get("domain") or "").strip()
-            if not domain or self._never_contact(domain=domain):
+            if not domain:
+                continue
+            if self._never_contact(domain=domain):
+                # Move it to the back of the rotation, or blocked companies
+                # at the front would hold every slot each cycle.
+                await self.state.mark_prospects_checked(company["id"])
                 continue
 
             contacts = await self._contacts_from_company(

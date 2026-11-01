@@ -40,6 +40,9 @@ async def test_backfill_skips_blocked_company():
     scout = _scout()
     scout.state.companies_needing_prospects = AsyncMock(
         return_value=[{"id": "c1", "domain": "blocked.example", "name": "Blocked"}])
+    scout.state.mark_prospects_checked = AsyncMock()
     scout._contacts_from_company = AsyncMock(return_value=[])
     await scout._prospect_via_known_companies()
     scout._contacts_from_company.assert_not_awaited()
+    # Rotated to the back, so it can't hold a slot every cycle.
+    scout.state.mark_prospects_checked.assert_awaited_once_with("c1")
