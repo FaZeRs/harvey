@@ -10,6 +10,7 @@ sending domain while nobody's watching.
 import html
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 from harvey.brain import Brain, BrainUnavailable
@@ -81,13 +82,15 @@ NO_THANKS_RE = re.compile(
 # A reply that says only this (signature aside) is an opt-out ("Reply STOP").
 # "הסר" is the Hebrew one, the word Israeli marketing asks for ("להסרה השיבו הסר").
 BARE_OPT_OUTS = {"stop", "unsubscribe", "remove", "remove me", "opt out",
-                 "no thanks", "no thank you",
+                 "no thanks", "no thank you", "baja", "no gracias", "de baja", "dar de baja",
+                 "darme de baja",
                  "הסר", "הסירו", "הסירי", "תסיר", "תסירו", "להסיר", "הסרה", "להסרה"}
 # Said around a bare opt-out without changing it ("הסר בבקשה", "הסר, תודה").
-_BARE_COURTESIES = {"בבקשה", "נא", "תודה", "רבה"}
+_BARE_COURTESIES = {"בבקשה", "נא", "תודה", "רבה", "por", "favor", "gracias", "saludos"}
 _MOBILE_SIGNATURE_RE = re.compile(
     r"^[ \t\u200e\u200f]*(?:sent from my \w[^\n]*|get outlook for \w[^\n]*"
-    r"|sent from \w+ mail[^\n]*|נשלח מ[^\n]*|קבל(?:ו)? את outlook[^\n]*)$",
+    r"|sent from \w+ mail[^\n]*|נשלח מ[^\n]*|קבל(?:ו)? את outlook[^\n]*"
+    r"|enviado desde mi \w[^\n]*|obt[eé]n outlook para \w[^\n]*)$",
     re.IGNORECASE | re.MULTILINE)
 
 # Hebrew opt-outs. Each needs a verb aimed at the sender and its object
@@ -161,6 +164,98 @@ HEBREW_NO_THANKS_RE = re.compile(
     r"|(?<!\w)תודה[ \t,.!-]+(?:(?:אבל|אך)[ \t]+)?(?:(?:אני|אנחנו|אנו)[ \t]+)?"
     + _HE_NOT_INTERESTED + _HE_FOR_NOW
     + r"(?=[ \t]*(?:[.!,]|$))")
+# Spanish opt-outs, matched with accents removed, one line at a time (a
+# signature underneath mustn't change what the line says). Like the Hebrew
+# ones, each needs the verb aimed at the sender: "dar de baja a nuestro
+# proveedor" is a buying signal, "sáquenme la cotización" a request, "no me
+# escribe" news.
+_ES_US = r"(?:me|nos)"
+_ES_LIST = (r"(?:(?:su|sus|la|las|el|los|esta|esa|este|ese|tu|vuestra)\s+)*"
+            r"(?:lista|base|correo|mail|email|envio|registro|contacto|boletin)\w*")
+_ES_MY_ADDRESS = r"(?:mi|mis|nuestro|nuestros)\s+(?:correo|mail|email|direccion|contacto|dato)\w*"
+_ES_MAIL = (r"(?:mas(?!\s+de\s)|correos?|mails?|emails?|e-mails?|mensajes?|publicidad|nada"
+            r"|informacion|ofertas?)")
+_ES_WRITE = r"(?:escribir|enviar|mandar|contactar|molestar)(?:me|nos|le|les)?"
+# The thought ends here: punctuation, the end of the line, or a comma that
+# doesn't go on to "but", "unless" or "if".
+_ES_SAY_END = (r"(?=[ \t]*(?:[.!;]|$|,(?![ \t]*(?:pero|aunque|salvo|excepto|a[ \t]+menos|si)"
+               r"(?!\w))))")
+SPANISH_OPT_OUT_PATTERNS = (
+    # Take me off.
+    r"(?:darme|darnos|dame|danos|deme|denos|denme|dennos|me\s+den|me\s+de|nos\s+den)\s+de\s+baja",
+    r"dar\s+de\s+baja\s+(?:mi|nuestro|nuestra|este|esta)\s+(?:correo|mail|email|direccion"
+    r"|suscripcion|cuenta)",
+    r"(?:saquen|saque|saca|quiten|quite|quita|borren|borre|borra|eliminen|elimine|elimina"
+    r"|retiren|retire|retira)" + _ES_US + r"(?:\s+de\s+" + _ES_LIST + "|" + _ES_SAY_END + ")",
+    r"(?:sacar|quitar|borrar|eliminar|retirar)" + _ES_US + r"\s+de\s+" + _ES_LIST,
+    r"(?:saquen|quiten|borren|eliminen|retiren|remuevan|eliminar|borrar|retirar|remover|quitar)\s+"
+    + _ES_MY_ADDRESS + r"\s+de\s+" + _ES_LIST,
+    r"desuscrib\w+|desinscrib\w+|(?:cancelar|anular)\s+(?:mi\s+|la\s+)?suscripcion",
+    # Don't write to / contact me. Subjunctive only: "no me escribe" is news.
+    r"no\s+" + _ES_US + r"\s+(?:escrib(?:a|as|an)|contact(?:e|es|en)|molest(?:e|es|en))(?!\w)",
+    r"no\s+" + _ES_US + r"\s+(?:envi(?:e|es|en)|mand(?:e|es|en))(?!\w)(?:\s+" + _ES_MAIL
+    + r"(?!\w)|" + _ES_SAY_END + ")",
+    r"no\s+(?:" + _ES_US + r"\s+)?vuelva(?:s|n)?\s+a\s+" + _ES_WRITE,
+    r"(?:dej|par)(?:e|en|a|ad)\s+de\s+" + _ES_WRITE,
+    r"basta\s+de\s+(?:correos|mails|emails|mensajes|publicidad)",
+    r"no\s+(?:quiero|queremos|deseo|deseamos)\s+(?:seguir\s+)?recibir\s+"
+    r"(?:(?:mas|sus|estos|estas|ningun|ninguna)\s+)*" + _ES_MAIL,
+    # Not interested, as the whole thought: not "no me interesa el plan anual".
+    r"(?:no\s+" + _ES_US + r"\s+interesan?|no\s+(?:estoy|estamos)\s+interesad[oa]s?"
+    r"|no\s+(?:tengo|tenemos)\s+(?:ningun\s+)?interes)"
+    r"(?:\s+(?:por\s+ahora|por\s+el\s+momento|en\s+este\s+momento|ahora))?" + _ES_SAY_END,
+)
+SPANISH_OPT_OUT_RE = re.compile(r"(?<!\w)(?:" + "|".join(SPANISH_OPT_OUT_PATTERNS) + r")(?!\w)",
+                                re.MULTILINE)
+# As with Hebrew: the word before it negates or conditions it ("no" only
+# before a phrase that doesn't start with its own "no"), or the rest of its
+# sentence narrows it to a time, or asks to be written to another way. The
+# model reads those instead.
+_ES_NOT_FINAL_BEFORE = {"no", "si", "porque", "cuando", "aun", "todavia", "como"}
+_ES_LAST_WORD_RE = re.compile(r"(\S+)[ \t]*\Z")
+_ES_NOT_FINAL_AFTER_RE = re.compile(
+    r"(?<!\w)(?:hasta|antes\s+de|despues\s+de|a\s+partir\s+de|mejor|whatsapp|por\s+telefono"
+    r"|llam(?:e|a|en)(?:me|nos)|escrib(?:e|a|an|eme|ame|anme|enos|anos)(?:me|nos)?"
+    r"|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|mes|enero|febrero|marzo"
+    r"|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?!\w)")
+# "No, gracias": as with "no thanks". Not "cómo no, gracias" (of course),
+# "sí o no", "si no", "por qué no", "todavía no", or "no, gracias a usted".
+SPANISH_NO_THANKS_RE = re.compile(
+    r"(?<!\bo )(?<!como )(?<!si )(?<!que )(?<!porque )(?<!todavia )(?<!aun )"
+    r"\bno,?[ \t]+(?:muchas[ \t]+)?gracias\b(?![ \t]+(?:a|por)\b)")
+
+
+def _no_accents(text: str) -> str:
+    """Accents dropped, for matching Spanish typed with or without them. Only
+    Latin letters: combining marks are what spell Hebrew and others' words."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if not (unicodedata.combining(c) and ord(c) < 0x370))
+
+
+def _spanish_lines(their_text: str) -> str:
+    """Their reply, flattened a line at a time and accent-free, mobile
+    signatures dropped, lines kept apart."""
+    text = _MOBILE_SIGNATURE_RE.sub("", their_text or "")
+    return _no_accents("\n".join(_flat(line) for line in text.split("\n")))
+
+
+def _spanish_opt_out(text: str):
+    """The first Spanish opt-out phrase in _spanish_lines text that means it."""
+    for m in SPANISH_OPT_OUT_RE.finditer(text):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        last = _ES_LAST_WORD_RE.search(text[max(line_start, m.start() - 40):m.start()])
+        before = last.group(1).lstrip("¿¡") if last else ""
+        if before in _ES_NOT_FINAL_BEFORE and not (before == "no" and m.group(0).startswith("no")):
+            continue
+        sentence_end = re.search(r"[.!?;\n]", text[m.end():])
+        after = text[m.end():m.end() + sentence_end.start()] if sentence_end else text[m.end():]
+        if _ES_NOT_FINAL_AFTER_RE.search(after):
+            continue
+        return m
+    return None
+
+
 # Direction marks a mail client puts around Hebrew, and Hebrew vowel points:
 # they change no word, so they mustn't hide one.
 _INVISIBLE_RE = re.compile(
@@ -242,8 +337,16 @@ def _opt_out_reason(their_text: str, own_words: str) -> dict | None:
     if m:
         return {"rule": "phrase", "matched": m.group(0),
                 "why": f'Their reply contains "{m.group(0)}".'}
+    m = _spanish_opt_out(_spanish_lines(their_text))
+    if m:
+        return {"rule": "phrase", "matched": m.group(0),
+                "why": f'Their reply contains "{m.group(0)}".'}
     for line in their_text.split("\n"):
         line = _flat(line)
+        m = SPANISH_NO_THANKS_RE.search(_no_accents(line))
+        if m:
+            return {"rule": "no_thanks", "matched": m.group(0),
+                    "why": f'Their reply says "{m.group(0)}" (no thanks).'}
         m = NO_THANKS_RE.search(line)
         if m:
             return {"rule": "no_thanks", "matched": m.group(0),
@@ -281,6 +384,78 @@ ESCALATION_PATTERNS = (
     "can-spam",
     "blacklist",
 )
+# Hebrew ones. A word with an ordinary business meaning needs the words that
+# make it a threat: "תביעות ביטוח" are a clinic's insurance claims and
+# "סליחה על ההטרדה" is "sorry to bother you"; "אתבע אתכם" (I'll sue you) is
+# only ever a threat.
+_HE_YOU = r"(?:אתכם|אותכם|אתכן|אותכן|אותך|אתך)"
+_HE_AGAINST_YOU = r"(?:נגדכם|נגדכן|נגדך)"
+_HE_ABOUT_YOU = r"(?:עליכם|עליכן|עלייך|עליך)"   # also "you must" ("עליכם להגיש")
+_HE_ACRONYM = r"[\"״'׳]{1,2}"   # עו"ד is a lawyer, עוד is "more"
+_HE_NOT_INSURER = r"(?!\s+(?:ל|ב|מול\s+|אל\s+|דרך\s+)?ה?(?:ביטוח|חבר[הת]|קופ))"
+HEBREW_ESCALATION_PATTERNS = (
+    # A lawyer, legal counsel, the legal department.
+    r"(?:עורך|עורכת|עורכי|עורכות)\s+ה?דין",
+    r"עו" + _HE_ACRONYM + "ד", r"עוה" + _HE_ACRONYM + "ד", r"יועמ" + _HE_ACRONYM + "ש",
+    r"פרקליט\w*",
+    r"(?:יועץ|יועצת|יועצי|יועצים|יועצות)\s+ה?משפטי(?:ת|ים|ות)?",
+    r"מחלקה\s+ה?משפטית",
+    # Legal action and court.
+    r"(?:צעד|צעדים|הליך|הליכים|פעולה|פעולות|אמצעים)\s+משפטי(?:ים|ת|ות)?",
+    r"(?:נקיטת|אנקוט|ננקוט|לנקוט)\s+(?:" + _HE_AGAINST_YOU + r"\s+)?ב?הליכים",
+    r"ערכא(?:ה|ות)",
+    r"(?:ניפגש|נפגש|נתראה)\s+ב?בית\s+ה?משפט",
+    r"(?:אפנה|נפנה|אגיע|נגיע|אלך|נלך|אגרור|נגרור)\s+(?:" + _HE_YOU + r"\s+)?לבית\s+ה?משפט",
+    r"תביעות\s+קטנות",
+    # Suing, and a lawsuit ("תביעה" alone is also an insurance claim).
+    r"(?:אתבע|נתבע|לתבוע|תובע|תובעת|תובעים|תובעות|תבעתי|תבענו)\s+" + _HE_YOU,
+    r"אתבע(?:\s+(?:על|אם|את)(?!\w)|(?=\s*(?:[.!]|$)))",
+    r"תביע(?:ה|ות)\s+(?:משפטית|משפטיות|ייצוגית|ייצוגיות)",
+    r"(?:תביע(?:ה|ות)|תלונ(?:ה|ות))\s+(?:רשמית\s+)?(?:" + _HE_AGAINST_YOU
+    + "|" + _HE_ABOUT_YOU + r"(?!\s+ל))",
+    r"(?:" + _HE_AGAINST_YOU + "|" + _HE_ABOUT_YOU + r")\s+(?:תביעה|תלונה)",
+    r"(?:אגיש|נגיש)\s+(?:תביעה|תלונה)" + _HE_NOT_INSURER,
+    r"(?:תקבלו|תקבל|תקבלי)\s+(?:(?:ממני|מאיתנו|מאתנו)\s+)?תביעה",
+    r"(?:צפו|תצפו|צפה|תצפה)\s+לתביעה",
+    r"מכתב\s+ה?(?:התראה|דרישה)",
+    r"התראה\s+(?:אחרונה\s+)?לפני\s+(?:נקיטת|תביעה|הליכים)",
+    # Reporting the sender: to the police, to a regulator.
+    r"(?:אתלונן|נתלונן|להתלונן|התלוננתי|אדווח|נדווח|לדווח|דיווחתי|דיווחנו)\s+(?:"
+    + _HE_AGAINST_YOU + "|" + _HE_ABOUT_YOU + ")",
+    r"(?:תלונ(?:ה|ות)|אתלונן|נתלונן|להתלונן|התלוננתי)\s+(?:\S+\s+)?[בל]משטרה",
+    r"(?:אלך|נלך|אפנה|נפנה|אגש|ניגש)\s+למשטרה",
+    r"רשות\s+ל?הגנת\s+ה?(?:פרטיות|צרכן)",
+    # The spam law (תיקון 40 לחוק התקשורת, סעיף 30א) and spam complaints.
+    r"חוק\s+ה?(?:ספאם|תקשורת)",
+    r"חוק\s+הגנת\s+ה?פרטיות",
+    r"תיקון\s+(?:מס['׳.\"]?\s*)?40",
+    r"סעיף\s+30\s*(?:א|a)",
+    r"דברי?\s+ה?פרסומת",
+    r"(?:ללא|בלי)\s+הוכחת\s+נזק",
+    r"(?:תלונ(?:ה|ת|ות)|דיווח)\s+(?:על\s+)?ה?ספאם",
+    r"(?:דיווחתי|דיווחנו|אדווח|נדווח|לדווח|סימנתי|אסמן|נסמן)\s+(?:\S+\s+){0,3}?כספאם",
+    # Harassment said as an accusation: not "אם זו הטרדה" or "זה לא מהווה הטרדה".
+    r"(?<!אם )(?<!לא )(?<!אין )(?:(?:זו|זאת|זה|זוהי)\s+(?:(?:ממש|פשוט|כבר)\s+)?"
+    r"(?:(?:מהווה|מהוות)\s+)?|מדובר\s+ב)הטרד(?:ה|ות)",
+    r"הטרד(?:ה|ות)\s+(?:מינית|מיניות|מאיימת|חוזרת|חוזרות)",
+    r"(?:תלונ(?:ה|ות)|תביע(?:ה|ות)|בגין)\s+(?:על\s+)?ה?הטרד(?:ה|ות)",
+    r"די\s+(?:עם\s+ה|ל)הטרד(?:ה|ות)",
+    r"(?:אתם|אתה|אתן)\s+מטריד(?:ים|ות)?\s+(?:אותי|אותנו)",
+    r"(?:תפסיק|תפסיקו|תפסיקי|הפסק|הפסיקו|הפסיקי)\s+להטריד",
+    r"רשימ(?:ה|ות)\s+ה?שחור(?:ה|ות)",
+    r"בלא?קליסט",
+)
+# Whole words, with the prefix letters Hebrew joins on ("ועורכת הדין", "לבית").
+HEBREW_ESCALATION_RE = re.compile(
+    r"(?<!\w)[ובכלמשה]{0,2}(?:" + "|".join(HEBREW_ESCALATION_PATTERNS) + r")(?!\w)")
+
+
+def _escalates(flat: str) -> bool:
+    """Whether their words (flattened, our text removed) need a human."""
+    # "עורך-דין" and "בית־המשפט" are the same words as with a space.
+    spaced = re.sub(r"(?<=[\u05d0-\u05ea])[-\u05be](?=[\u05d0-\u05ea])", " ", flat)
+    return (any(p in flat for p in ESCALATION_PATTERNS)
+            or HEBREW_ESCALATION_RE.search(spaced) is not None)
 
 
 # The conversation a reply is written from. Cold-email threads are short, so
@@ -556,9 +731,9 @@ class Handler:
         keyword_text = _flat(their_text)
         stripped = strip_quoted_reply(reply_text) or reply_text
         reply_text = ours.remove(stripped).strip() or stripped
+        escalate = _escalates(keyword_text)
 
         if prospect.status == "opted_out":
-            escalate = any(p in keyword_text for p in ESCALATION_PATTERNS)
             await self._record_after_opt_out(prospect, reply_text, campaign_id, escalate)
             return
 
@@ -576,11 +751,12 @@ class Handler:
             logger.debug(f"Handler: outbox cancel failed: {e}")
 
         # 1. Classify intent. Hard keyword checks run FIRST and override
-        # the LLM — opt-outs and legal threats must never be missed.
+        # the LLM — opt-outs and legal threats must never be missed. An
+        # opt-out that also threatens is both: honoured, and handed to you.
         opt_out = _opt_out_reason(their_text, reply_text)
         if opt_out:
             intent = "unsubscribe"
-        elif any(p in keyword_text for p in ESCALATION_PATTERNS):
+        elif escalate:
             intent = "escalate"
         else:
             intent = await self._classify_intent(reply_text, prospect)
@@ -662,9 +838,11 @@ class Handler:
 
         # 3. Route based on intent
         if intent == "unsubscribe":
-            # Honor opt-outs ALWAYS. No reply, no future contact.
+            # Honor opt-outs ALWAYS. No reply, no future contact. A legal
+            # threat or complaint in the same reply still goes to you.
             await self.state.update_conversation(
-                convo.id, status="needs_human" if handed_off else "closed", stage="closed_lost")
+                convo.id, status="needs_human" if handed_off or escalate else "closed",
+                stage="closed_lost")
             await self.state.update_prospect_status(prospect.id, "opted_out")
             await self.state.log_action(
                 action_type="opt_out",
@@ -677,6 +855,17 @@ class Handler:
                     "conversation_id": convo.id,
                 },
             )
+            if escalate:
+                await self.state.log_action(
+                    action_type="escalation",
+                    agent="handler",
+                    details={"prospect_email": lead_email, "reply_preview": reply_text[:200]},
+                )
+                logger.warning(
+                    f"Handler: {lead_email} opted out with a complaint or legal threat. "
+                    "Suppressed permanently and ESCALATED for human review. No reply sent."
+                )
+                return
             logger.info(f"Handler: {lead_email} opted out. Suppressed permanently. No reply sent.")
             return
 
